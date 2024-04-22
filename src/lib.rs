@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
 use base64::{engine::general_purpose::URL_SAFE, Engine};
 use thiserror::Error;
@@ -6,9 +7,11 @@ use thiserror::Error;
 pub mod path;
 pub mod store;
 
+#[derive(Debug)]
 pub struct Repository {
     path: PathBuf,
     work_dir: PathBuf,
+    generation: u64,
 }
 impl Repository {
     pub fn path(&self) -> &PathBuf {
@@ -40,7 +43,41 @@ impl Repository {
             }
         };
 
-        Ok(Repository { path, work_dir })
+        let generation_file_path = path.join("generation");
+        let generation = match std::fs::read_to_string(&generation_file_path) {
+            Ok(generation) => {
+                u64::from_str(&generation).map_err(|e| Error::ParseIntError(e, generation))?
+            }
+            _ => {
+                eprintln!("No timestamp found, assuming generation 1");
+                1
+            }
+        };
+
+        Ok(Repository {
+            path,
+            work_dir,
+            generation,
+        })
+    }
+
+    fn save_state(&self) -> Result<(), Error> {
+        std::fs::write(
+            self.path.join("working"),
+            self.work_dir().display().to_string(),
+        )?;
+        std::fs::write(self.path.join("generation"), format!("{}", self.generation))?;
+
+        Ok(())
+    }
+}
+impl Drop for Repository {
+    fn drop(&mut self) {
+        if self.save_state().is_err() {
+            eprintln!("Failed to save repository state");
+            eprintln!("debug:");
+            eprintln!("{:#?}", self);
+        }
     }
 }
 
@@ -56,6 +93,8 @@ pub enum Error {
     FailedToCreateDir(PathBuf, #[source] std::io::Error),
     #[error("The repository has no working directory")]
     NoWorking,
+    #[error("Failed to parse '{1}' as int.")]
+    ParseIntError(#[source] core::num::ParseIntError, String),
 }
 
 pub fn create_repository(path: PathBuf, work_dir: PathBuf) -> Result<Repository, Error> {
@@ -76,10 +115,9 @@ pub fn create_repository_force(path: PathBuf, work_dir: PathBuf) -> Result<Repos
     let work_dir = work_dir.canonicalize()?;
     std::fs::write(path.join("working"), work_dir.display().to_string())?;
 
-    Ok(Repository {
-        path: path.canonicalize()?,
-        work_dir,
-    })
+    std::fs::write(path.join("timestamp"), "1.0")?;
+
+    Repository::open(path)
 }
 
 fn path_to_base64(path: &Path) -> String {
@@ -99,6 +137,7 @@ mod tests {
         let repo = Repository {
             path: PathBuf::from("/path/to/repository/.dj"),
             work_dir: PathBuf::from("/path/to/repository"),
+            generation: 1,
         };
 
         let file = PathBuf::from("/path/to/repository/foo.txt");

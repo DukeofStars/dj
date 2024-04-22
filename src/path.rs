@@ -7,14 +7,14 @@ use thiserror::Error;
 pub enum Error {
     #[error("The path is required to be relative, but it was not.")]
     PathIsntRelative(PathBuf),
-    #[error("The path has no timestamp (e.g. _._@some/path)")]
-    NoTimestamp,
     #[error("Failed to parse '{1}' as int.")]
     ParseIntError(#[source] core::num::ParseIntError, String),
     #[error("Failed to decode base64")]
     DecodeError(#[from] base64::DecodeError),
     #[error("Invalid utf8")]
     InvalidUtf8(#[from] std::string::FromUtf8Error),
+    #[error("Invalid path syntax. (correct usage: '{{gen}}:{{path}}@{{step}}')")]
+    InvalidPathSyntax,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -28,10 +28,10 @@ impl Display for Path {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.{}@{}",
+            "{}:{}@{}",
             self.generation,
+            self.relative_path.display(),
             self.step,
-            self.relative_path.display()
         )
     }
 }
@@ -39,19 +39,18 @@ impl FromStr for Path {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let Some((timestamp, path)) = s.split_once("@") else {
-            return Err(Error::NoTimestamp);
+        let Some((generation, rest)) = s.split_once(":") else {
+            return Err(Error::InvalidPathSyntax);
         };
+        let generation = u64::from_str(generation)
+            .map_err(|e| Error::ParseIntError(e, generation.to_string()))?;
 
-        let path = PathBuf::from(path);
-
-        let (gen, step) = match timestamp.split_once(".") {
+        let (path, step) = match rest.rsplit_once("@") {
             Some((left, right)) => (left, right),
-            None => (timestamp, "0"),
+            None => return Err(Error::InvalidPathSyntax),
         };
-        let generation =
-            u64::from_str(gen).map_err(|e| Error::ParseIntError(e, gen.to_string()))?;
         let step = u64::from_str(step).map_err(|e| Error::ParseIntError(e, step.to_string()))?;
+        let path = PathBuf::from(path);
 
         Path::new(generation, step, path)
     }
@@ -94,7 +93,7 @@ mod tests {
     #[test]
     pub fn from_str_test() {
         assert_eq!(
-            Path::from_str("43.18@src/main.rs").unwrap(),
+            Path::from_str("43:src/main.rs@18").unwrap(),
             Path::new(43, 18, PathBuf::from("src/main.rs")).unwrap()
         );
     }
@@ -105,7 +104,7 @@ mod tests {
             Path::new(43, 18, PathBuf::from("src/main.rs"))
                 .unwrap()
                 .to_string(),
-            "43.18@src/main.rs".to_string()
+            "43:src/main.rs@18".to_string()
         )
     }
 

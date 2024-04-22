@@ -1,8 +1,6 @@
 use std::path::PathBuf;
 
-use base64::{engine::general_purpose::URL_SAFE, Engine};
 use thiserror::Error;
-use xxhash_rust::xxh3::xxh3_128;
 
 use crate::Repository;
 
@@ -113,12 +111,11 @@ impl<'repo> Store<'repo> {
             return self.add_object_dir(&path);
         }
 
-        let bytes = std::fs::read(&path).map_err(|e| Error::FailedToReadFile(e, path))?;
-        let hash = {
-            let hash = xxh3_128(&bytes);
-            URL_SAFE.encode(hash.to_be_bytes())
-        };
-        let path = self.objects_path().join(hash);
+        let bytes = std::fs::read(&path).map_err(|e| Error::FailedToReadFile(e, path.clone()))?;
+        let obj_path = crate::path::Path::new(self.repo.generation, 1, path)
+            .expect("Path is already guaranteed to be relative")
+            .to_store_path();
+        let path = self.objects_path().join(obj_path);
 
         self.ensure_objects_path_exists()?;
 
