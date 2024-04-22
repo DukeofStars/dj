@@ -24,6 +24,9 @@ enum Command {
     Track {
         files: Vec<PathBuf>,
     },
+    Step {
+        files: Vec<PathBuf>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -57,6 +60,16 @@ fn main() -> Result<()> {
                         .begin_tracking(&file)
                         .wrap_err(format!("Failed to track '{}'", file.display()))?;
                 }
+            }
+        }
+        Command::Step { files } => {
+            let repo = Repository::open(cli.path)?;
+            let store = Store::new(&repo);
+
+            for file in files.iter().filter_map(|f| f.canonicalize().ok()) {
+                // Currently we assume the files always have changes.
+                // In the future, we should check to see if they have actually changed.
+                store.add_object(&file)?;
             }
         }
     }

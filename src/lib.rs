@@ -22,6 +22,10 @@ impl Repository {
     }
 
     pub fn relative_path<'a>(&self, path: &'a PathBuf) -> Option<PathBuf> {
+        if path.is_relative() {
+            return Some(path.clone());
+        }
+
         path.strip_prefix(self.work_dir())
             .ok()
             .map(|p| p.to_path_buf())

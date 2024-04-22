@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use base64::{engine::general_purpose::URL_SAFE, Engine};
 use thiserror::Error;
 
 use crate::Repository;
@@ -101,6 +102,41 @@ impl<'repo> Store<'repo> {
         Ok(())
     }
 
+    fn list_objects(&self) -> Result<Vec<String>, Error> {
+        Ok(self
+            .objects_path()
+            .read_dir()
+            .unwrap()
+            .into_iter()
+            .filter_map(|res| res.ok())
+            .map(|entry| {
+                let path = entry.path();
+                let path = path.strip_prefix(&self.objects_path()).unwrap();
+                path.display().to_string()
+            })
+            .collect())
+    }
+    fn list_objects_with_prefix(&self, prefix: &str) -> Result<Vec<String>, Error> {
+        Ok(self
+            .list_objects()?
+            .into_iter()
+            .filter(|x| x.starts_with(prefix))
+            .collect())
+    }
+
+    fn get_next_object_step(&self, path: &PathBuf) -> Result<u64, Error> {
+        let path = self
+            .repo
+            .relative_path(path)
+            .ok_or(Error::FileNotInWorking(path.clone()))?;
+
+        let prefix = URL_SAFE.encode(format!("{}:{}", self.repo.generation, path.display()));
+        let objects = self.list_objects_with_prefix(&prefix)?;
+
+        let next_step = objects.len() as u64 + 1;
+        Ok(next_step)
+    }
+
     pub fn add_object(&self, path: &PathBuf) -> Result<(), Error> {
         let path = self
             .repo
@@ -112,7 +148,8 @@ impl<'repo> Store<'repo> {
         }
 
         let bytes = std::fs::read(&path).map_err(|e| Error::FailedToReadFile(e, path.clone()))?;
-        let obj_path = crate::path::Path::new(self.repo.generation, 1, path)
+        let step = self.get_next_object_step(&path)?;
+        let obj_path = crate::path::Path::new(self.repo.generation, step, path)
             .expect("Path is already guaranteed to be relative")
             .to_store_path();
         let path = self.objects_path().join(obj_path);
