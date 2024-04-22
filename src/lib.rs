@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use base64::{engine::general_purpose::URL_SAFE, Engine};
 use thiserror::Error;
 
+pub mod path;
 pub mod store;
 
 pub struct Repository {
