@@ -21,7 +21,7 @@ enum Command {
         #[clap(short, long)]
         force: bool,
     },
-    Add {
+    Track {
         files: Vec<PathBuf>,
     },
 }
@@ -47,7 +47,7 @@ fn main() -> Result<()> {
             );
             println!("working in: '{}'", repository.work_dir().display());
         }
-        Command::Add { files } => {
+        Command::Track { files } => {
             let repo = Repository::open(cli.path)?;
             let store = Store::new(&repo);
 
@@ -56,12 +56,7 @@ fn main() -> Result<()> {
                     store
                         .begin_tracking(&file)
                         .wrap_err(format!("Failed to track '{}'", file.display()))?;
-                    println!("tracking: {}", file.display());
                 }
-                store.add_object(&file).wrap_err(format!(
-                    "Failed to add '{}' to the object store.",
-                    file.display()
-                ))?;
             }
         }
     }
