@@ -4,6 +4,7 @@ use std::str::FromStr;
 use base64::{engine::general_purpose::URL_SAFE, Engine};
 use thiserror::Error;
 
+pub mod metadata;
 pub mod path;
 pub mod store;
 
@@ -19,6 +20,9 @@ impl Repository {
     }
     pub fn work_dir(&self) -> &PathBuf {
         &self.work_dir
+    }
+    pub fn generation(&self) -> &u64 {
+        &self.generation
     }
 
     pub fn relative_path<'a>(&self, path: &'a PathBuf) -> Option<PathBuf> {

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 use color_eyre::{eyre::Context, Result};
-use dj::{store::Store, Repository};
+use dj::{metadata::Metadata, store::Store, Repository};
 
 #[derive(Debug, Parser)]
 struct Cli {
@@ -26,6 +26,18 @@ enum Command {
     },
     Step {
         files: Vec<PathBuf>,
+    },
+    #[clap(alias = "gen")]
+    Generation {
+        #[clap(subcommand)]
+        command: GenerationCommand,
+    },
+}
+#[derive(Debug, Subcommand)]
+enum GenerationCommand {
+    Describe {
+        #[clap(short, long)]
+        msg: String,
     },
 }
 
@@ -71,6 +83,21 @@ fn main() -> Result<()> {
                 // In the future, we should check to see if they have actually changed.
                 store.add_object(&file)?;
             }
+        }
+        Command::Generation { command } => {
+            let repo = Repository::open(cli.path)?;
+            run_generation_command(repo, command)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn run_generation_command(repo: Repository, command: GenerationCommand) -> Result<()> {
+    match command {
+        GenerationCommand::Describe { msg } => {
+            let meta = Metadata::new(&repo)?;
+            meta.set_generation_description(*repo.generation(), msg)?;
         }
     }
 

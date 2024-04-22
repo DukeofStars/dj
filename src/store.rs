@@ -147,6 +147,10 @@ impl<'repo> Store<'repo> {
             return self.add_object_dir(&path);
         }
 
+        if !self.is_tracked(&path) {
+            return Ok(());
+        }
+
         let bytes = std::fs::read(&path).map_err(|e| Error::FailedToReadFile(e, path.clone()))?;
         let step = self.get_next_object_step(&path)?;
         let obj_path = crate::path::Path::new(self.repo.generation, step, path)
