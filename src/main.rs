@@ -1,7 +1,14 @@
-use std::path::PathBuf;
+use std::{
+    io::{stdout, Write},
+    path::PathBuf,
+    str::FromStr,
+};
 
 use clap::{Parser, Subcommand};
-use color_eyre::{eyre::Context, Result};
+use color_eyre::{
+    eyre::{eyre, Context},
+    Result,
+};
 use dj::{metadata::Metadata, store::Store, Repository};
 
 #[derive(Debug, Parser)]
@@ -32,6 +39,11 @@ enum Command {
         #[clap(subcommand)]
         command: GenerationCommand,
     },
+    #[clap(alias = "obj")]
+    Object {
+        #[clap(subcommand)]
+        command: ObjectCommand,
+    },
 }
 #[derive(Debug, Subcommand)]
 enum GenerationCommand {
@@ -39,6 +51,11 @@ enum GenerationCommand {
         #[clap(short, long)]
         msg: String,
     },
+}
+#[derive(Debug, Subcommand)]
+enum ObjectCommand {
+    AtPath { path: String },
+    ListPaths,
 }
 
 fn main() -> Result<()> {
@@ -87,6 +104,39 @@ fn main() -> Result<()> {
         Command::Generation { command } => {
             let repo = Repository::open(cli.path)?;
             run_generation_command(repo, command)?;
+        }
+        Command::Object { command } => {
+            let repo = Repository::open(cli.path)?;
+            run_object_command(repo, command)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn run_object_command(repo: Repository, command: ObjectCommand) -> Result<()> {
+    match command {
+        ObjectCommand::AtPath { path } => {
+            let store = Store::new(&repo);
+
+            let path = dj::path::Path::from_str(&path)?;
+            let store_path = store.objects_path().join(path.to_store_path());
+
+            if !store_path.exists() {
+                return Err(eyre!("Requested path doesn't exist."));
+            }
+
+            let bytes = std::fs::read(store_path)?;
+            stdout().write_all(&bytes)?;
+        }
+        ObjectCommand::ListPaths => {
+            let store = Store::new(&repo);
+
+            for object in store.list_objects()? {
+                if let Ok(path) = dj::path::Path::from_store_path(object) {
+                    println!("{path}");
+                }
+            }
         }
     }
 

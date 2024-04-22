@@ -30,10 +30,10 @@ impl<'repo> Store<'repo> {
         Store { repo }
     }
 
-    fn store_path(&self) -> PathBuf {
+    pub fn store_path(&self) -> PathBuf {
         self.repo.path().join("store")
     }
-    fn objects_path(&self) -> PathBuf {
+    pub fn objects_path(&self) -> PathBuf {
         self.store_path().join("objects")
     }
 
@@ -102,7 +102,7 @@ impl<'repo> Store<'repo> {
         Ok(())
     }
 
-    fn list_objects(&self) -> Result<Vec<String>, Error> {
+    pub fn list_objects(&self) -> Result<Vec<String>, Error> {
         Ok(self
             .objects_path()
             .read_dir()
