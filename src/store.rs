@@ -163,31 +163,34 @@ impl<'repo> Store<'repo> {
     }
 
     pub fn add_object(&self, path: &PathBuf) -> Result<(), Error> {
-        let path = self
+        let src_path = self
             .repo
             .relative_path(path)
             .ok_or(Error::FileNotInWorking(path.clone()))?;
 
-        if path.is_dir() {
-            return self.add_object_dir(&path);
+        if src_path.is_dir() {
+            return self.add_object_dir(&src_path);
         }
 
-        if !self.is_tracked(&path) {
+        if !self.is_tracked(&src_path) {
             return Ok(());
         }
 
-        let bytes = std::fs::read(&path).map_err(|e| Error::FailedToReadFile(e, path.clone()))?;
-        let step = self.get_next_object_step(&path)?;
-        let obj_path = crate::path::Path::new(self.repo.generation, step, path)
-            .expect("Path is already guaranteed to be relative")
-            .to_store_path();
-        let path = self.objects_path().join(obj_path);
-
         self.ensure_objects_path_exists()?;
 
-        if !path.exists() {
-            std::fs::write(&path, bytes).map_err(|e| Error::FailedToWriteToFile(e, path))?;
-        }
+        let step = self.get_next_object_step(&src_path)?;
+        let obj_path = crate::path::Path::new(self.repo.generation, step, src_path.clone())
+            .expect("Path is already guaranteed to be relative")
+            .to_store_path();
+        let out_path = self.objects_path().join(obj_path);
+
+        let bytes = if src_path.exists() {
+            std::fs::read(&src_path).map_err(|e| Error::FailedToReadFile(e, out_path.clone()))?
+        } else {
+            // If the src_path doesn't exist (file has been deleted), just create an empty object file.
+            Vec::new()
+        };
+        std::fs::write(&out_path, bytes).map_err(|e| Error::FailedToWriteToFile(e, out_path))?;
 
         Ok(())
     }

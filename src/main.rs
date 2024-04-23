@@ -100,10 +100,16 @@ fn main() -> Result<()> {
             let repo = Repository::open(cli.path)?;
             let store = Store::new(&repo);
 
-            for file in files.iter().filter_map(|f| f.canonicalize().ok()) {
-                // Currently we assume the files always have changes.
-                // In the future, we should check to see if they have actually changed.
-                store.add_object(&file)?;
+            if !files.is_empty() {
+                for file in files.iter().filter_map(|f| f.canonicalize().ok()) {
+                    // Currently we assume the files always have changes.
+                    // In the future, we should check to see if they have actually changed.
+                    store.add_object(&file)?;
+                }
+            } else {
+                for file in store.tracked_files()? {
+                    store.add_object(&file)?;
+                }
             }
         }
         Command::Generation { command } => {
