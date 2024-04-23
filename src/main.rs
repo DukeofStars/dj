@@ -55,6 +55,7 @@ enum GenerationCommand {
         #[clap(short, long)]
         msg: String,
     },
+    New,
 }
 #[derive(Debug, Subcommand)]
 enum ObjectCommand {
@@ -152,11 +153,14 @@ fn run_object_command(repo: Repository, command: ObjectCommand) -> Result<()> {
     Ok(())
 }
 
-fn run_generation_command(repo: Repository, command: GenerationCommand) -> Result<()> {
+fn run_generation_command(mut repo: Repository, command: GenerationCommand) -> Result<()> {
     match command {
         GenerationCommand::Describe { msg } => {
             let meta = Metadata::new(&repo)?;
             meta.set_generation_description(*repo.generation(), msg)?;
+        }
+        GenerationCommand::New => {
+            repo.inc_generation();
         }
     }
 

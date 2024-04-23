@@ -25,6 +25,10 @@ impl Repository {
         &self.generation
     }
 
+    pub fn inc_generation(&mut self) {
+        self.generation += 1;
+    }
+
     pub fn relative_path<'a>(&self, path: &'a PathBuf) -> Option<PathBuf> {
         if path.is_relative() {
             return Some(path.clone());
