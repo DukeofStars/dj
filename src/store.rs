@@ -19,6 +19,10 @@ pub enum Error {
     FailedToReadFile(#[source] std::io::Error, PathBuf),
     #[error("The file '{}' is not in the repository working directory.", .0.display())]
     FileNotInWorking(PathBuf),
+    #[error("Failed to decode base64")]
+    DecodeError(#[from] base64::DecodeError),
+    #[error("Invalid utf8")]
+    InvalidUtf8(#[from] std::string::FromUtf8Error),
 }
 
 pub struct Store<'repo> {
@@ -64,6 +68,23 @@ impl<'repo> Store<'repo> {
 
         store_path.exists()
     }
+    pub fn tracked_files(&self) -> Result<Vec<PathBuf>, Error> {
+        self.store_path()
+            .read_dir()
+            .map_err(|e| Error::FailedToReadDir(e, self.store_path()))?
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.file_type().unwrap().is_file())
+            .map(|entry| {
+                let path = entry.path();
+                let filename = path.file_name().unwrap().to_str().unwrap();
+                let rel_path =
+                    String::from_utf8(URL_SAFE.decode(filename).map_err(Error::DecodeError)?)
+                        .map_err(Error::InvalidUtf8)?;
+                let rel_path = PathBuf::from(rel_path);
+                Ok(rel_path)
+            })
+            .collect()
+    }
 
     pub fn begin_tracking(&self, path: &PathBuf) -> Result<(), Error> {
         let path = self
@@ -103,11 +124,9 @@ impl<'repo> Store<'repo> {
     }
 
     pub fn list_objects(&self) -> Result<Vec<String>, Error> {
-        let Ok(read_dir) = self
-            .objects_path()
-            .read_dir() else {
-                return Ok(Vec::new())
-            };
+        let Ok(read_dir) = self.objects_path().read_dir() else {
+            return Ok(Vec::new());
+        };
         Ok(read_dir
             .into_iter()
             .filter_map(|res| res.ok())
@@ -132,7 +151,11 @@ impl<'repo> Store<'repo> {
             .relative_path(path)
             .ok_or(Error::FileNotInWorking(path.clone()))?;
 
-        let prefix = format!("{}:{}", self.repo.generation(), URL_SAFE.encode(path.display().to_string()));
+        let prefix = format!(
+            "{}:{}",
+            self.repo.generation(),
+            URL_SAFE.encode(path.display().to_string())
+        );
         let objects = self.list_objects_with_prefix(&prefix)?;
 
         let next_step = objects.len() as u64 + 1;

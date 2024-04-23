@@ -70,7 +70,12 @@ impl Path {
     }
 
     pub fn to_store_path(&self) -> String {
-        format!("{}:{}@{}", self.generation, URL_SAFE.encode(self.relative_path.display().to_string()), self.step)
+        format!(
+            "{}:{}@{}",
+            self.generation,
+            URL_SAFE.encode(self.relative_path.display().to_string()),
+            self.step
+        )
     }
     pub fn from_store_path(text: String) -> Result<Path, Error> {
         let Some((generation, rest)) = text.split_once(":") else {
@@ -84,7 +89,7 @@ impl Path {
             None => return Err(Error::InvalidPathSyntax),
         };
         let step = u64::from_str(step).map_err(|e| Error::ParseIntError(e, step.to_string()))?;
-        
+
         let decoded_path = URL_SAFE.decode(path).map_err(Error::DecodeError)?;
         let string_path = String::from_utf8(decoded_path).map_err(Error::InvalidUtf8)?;
         let path = PathBuf::from(string_path);

@@ -47,7 +47,7 @@ enum Command {
     /// Alias for 'dj obj at-path [path]'
     Cat {
         path: String,
-    }
+    },
 }
 #[derive(Debug, Subcommand)]
 enum GenerationCommand {
