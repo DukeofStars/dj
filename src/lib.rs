@@ -123,8 +123,6 @@ pub fn create_repository_force(path: PathBuf, work_dir: PathBuf) -> Result<Repos
     let work_dir = work_dir.canonicalize()?;
     std::fs::write(path.join("working"), work_dir.display().to_string())?;
 
-    std::fs::write(path.join("timestamp"), "1.0")?;
-
     Repository::open(path)
 }
 

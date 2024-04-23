@@ -103,10 +103,12 @@ impl<'repo> Store<'repo> {
     }
 
     pub fn list_objects(&self) -> Result<Vec<String>, Error> {
-        Ok(self
+        let Ok(read_dir) = self
             .objects_path()
-            .read_dir()
-            .unwrap()
+            .read_dir() else {
+                return Ok(Vec::new())
+            };
+        Ok(read_dir
             .into_iter()
             .filter_map(|res| res.ok())
             .map(|entry| {
