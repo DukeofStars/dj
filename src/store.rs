@@ -132,7 +132,7 @@ impl<'repo> Store<'repo> {
             .relative_path(path)
             .ok_or(Error::FileNotInWorking(path.clone()))?;
 
-        let prefix = URL_SAFE.encode(format!("{}:{}", self.repo.generation, path.display()));
+        let prefix = format!("{}:{}", self.repo.generation(), URL_SAFE.encode(path.display().to_string()));
         let objects = self.list_objects_with_prefix(&prefix)?;
 
         let next_step = objects.len() as u64 + 1;

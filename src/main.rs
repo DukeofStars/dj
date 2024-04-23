@@ -44,6 +44,10 @@ enum Command {
         #[clap(subcommand)]
         command: ObjectCommand,
     },
+    /// Alias for 'dj obj at-path [path]'
+    Cat {
+        path: String,
+    }
 }
 #[derive(Debug, Subcommand)]
 enum GenerationCommand {
@@ -107,6 +111,11 @@ fn main() -> Result<()> {
         }
         Command::Object { command } => {
             let repo = Repository::open(cli.path)?;
+            run_object_command(repo, command)?;
+        }
+        Command::Cat { path } => {
+            let repo = Repository::open(cli.path)?;
+            let command = ObjectCommand::AtPath { path };
             run_object_command(repo, command)?;
         }
     }
