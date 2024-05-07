@@ -69,32 +69,24 @@ impl Path {
         })
     }
 
-    pub fn to_store_path(&self) -> String {
-        format!(
-            "{}:{}@{}",
-            self.generation,
-            URL_SAFE.encode(self.relative_path.display().to_string()),
-            self.step
-        )
+    pub fn to_store_path(&self) -> PathBuf {
+        PathBuf::from(URL_SAFE.encode(self.relative_path.display().to_string()))
+            .join(self.step.to_string())
     }
-    pub fn from_store_path(text: String) -> Result<Path, Error> {
-        let Some((generation, rest)) = text.split_once(":") else {
+    pub fn from_store_path(path: PathBuf) -> Result<Path, Error> {
+        if !path.is_relative() {
             return Err(Error::InvalidPathSyntax);
-        };
-        let generation = u64::from_str(generation)
-            .map_err(|e| Error::ParseIntError(e, generation.to_string()))?;
+        }
+        let mut iter = path.components();
+        let rel_path = iter.next().ok_or(Error::InvalidPathSyntax)?;
+        let step = iter.next().ok_or(Error::InvalidPathSyntax)?;
+        if iter.count() != 0 {
+            return Err(Error::InvalidPathSyntax);
+        }
 
-        let (path, step) = match rest.rsplit_once("@") {
-            Some((left, right)) => (left, right),
-            None => return Err(Error::InvalidPathSyntax),
-        };
-        let step = u64::from_str(step).map_err(|e| Error::ParseIntError(e, step.to_string()))?;
+        let rel_path = URL_SAFE.decode(rel_path);
 
-        let decoded_path = URL_SAFE.decode(path).map_err(Error::DecodeError)?;
-        let string_path = String::from_utf8(decoded_path).map_err(Error::InvalidUtf8)?;
-        let path = PathBuf::from(string_path);
-
-        Path::new(generation, step, path)
+        todo!()
     }
 }
 
