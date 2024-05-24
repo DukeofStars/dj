@@ -1,10 +1,7 @@
-use std::path::{Path, PathBuf};
-use std::str::FromStr;
+use std::path::PathBuf;
 
-use base64::{engine::general_purpose::URL_SAFE, Engine};
 use thiserror::Error;
 
-pub mod metadata;
 pub mod path;
 pub mod store;
 
@@ -12,7 +9,6 @@ pub mod store;
 pub struct Repository {
     path: PathBuf,
     work_dir: PathBuf,
-    generation: u64,
 }
 impl Repository {
     pub fn path(&self) -> &PathBuf {
@@ -20,13 +16,6 @@ impl Repository {
     }
     pub fn work_dir(&self) -> &PathBuf {
         &self.work_dir
-    }
-    pub fn generation(&self) -> &u64 {
-        &self.generation
-    }
-
-    pub fn inc_generation(&mut self) {
-        self.generation += 1;
     }
 
     pub fn relative_path<'a>(&self, path: &'a PathBuf) -> Option<PathBuf> {
@@ -55,22 +44,7 @@ impl Repository {
             }
         };
 
-        let generation_file_path = path.join("generation");
-        let generation = match std::fs::read_to_string(&generation_file_path) {
-            Ok(generation) => {
-                u64::from_str(&generation).map_err(|e| Error::ParseIntError(e, generation))?
-            }
-            _ => {
-                eprintln!("No timestamp found, assuming generation 1");
-                1
-            }
-        };
-
-        Ok(Repository {
-            path,
-            work_dir,
-            generation,
-        })
+        Ok(Repository { path, work_dir })
     }
 
     fn save_state(&self) -> Result<(), Error> {
@@ -78,7 +52,6 @@ impl Repository {
             self.path.join("working"),
             self.work_dir().display().to_string(),
         )?;
-        std::fs::write(self.path.join("generation"), format!("{}", self.generation))?;
 
         Ok(())
     }
@@ -130,12 +103,6 @@ pub fn create_repository_force(path: PathBuf, work_dir: PathBuf) -> Result<Repos
     Repository::open(path)
 }
 
-fn path_to_base64(path: &Path) -> String {
-    let mut encoded = String::new();
-    URL_SAFE.encode_string(path.display().to_string(), &mut encoded);
-    encoded
-}
-
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -147,7 +114,6 @@ mod tests {
         let repo = Repository {
             path: PathBuf::from("/path/to/repository/.dj"),
             work_dir: PathBuf::from("/path/to/repository"),
-            generation: 1,
         };
 
         let file = PathBuf::from("/path/to/repository/foo.txt");

@@ -5,11 +5,8 @@ use std::{
 };
 
 use clap::{Parser, Subcommand};
-use color_eyre::{
-    eyre::{eyre, Context},
-    Result,
-};
-use dj::{metadata::Metadata, store::Store, Repository};
+use color_eyre::{eyre::WrapErr, Result};
+use dj::{store::Store, Repository};
 
 #[derive(Debug, Parser)]
 struct Cli {
@@ -34,11 +31,6 @@ enum Command {
     Step {
         files: Vec<PathBuf>,
     },
-    #[clap(alias = "gen")]
-    Generation {
-        #[clap(subcommand)]
-        command: GenerationCommand,
-    },
     #[clap(alias = "obj")]
     Object {
         #[clap(subcommand)]
@@ -50,17 +42,8 @@ enum Command {
     },
 }
 #[derive(Debug, Subcommand)]
-enum GenerationCommand {
-    Describe {
-        #[clap(short, long)]
-        msg: String,
-    },
-    New,
-}
-#[derive(Debug, Subcommand)]
 enum ObjectCommand {
     AtPath { path: String },
-    ListPaths,
 }
 
 fn main() -> Result<()> {
@@ -78,11 +61,11 @@ fn main() -> Result<()> {
                 true => dj::create_repository_force(path, work_dir)?,
                 false => dj::create_repository(path, work_dir)?,
             };
-            println!(
+            eprintln!(
                 "Created new repository in: '{}'",
                 repository.path().display()
             );
-            println!("working in: '{}'", repository.work_dir().display());
+            eprintln!("working in: '{}'", repository.work_dir().display());
         }
         Command::Track { files } => {
             let repo = Repository::open(cli.path)?;
@@ -99,22 +82,14 @@ fn main() -> Result<()> {
         Command::Step { files } => {
             let repo = Repository::open(cli.path)?;
             let store = Store::new(&repo);
-
-            if !files.is_empty() {
-                for file in files.iter().filter_map(|f| f.canonicalize().ok()) {
-                    // Currently we assume the files always have changes.
-                    // In the future, we should check to see if they have actually changed.
-                    store.add_object(&file)?;
-                }
+            let files = if !files.is_empty() {
+                files.iter().filter_map(|f| f.canonicalize().ok()).collect()
             } else {
-                for file in store.tracked_files()? {
-                    store.add_object(&file)?;
-                }
+                store.tracked_files()?
+            };
+            for file in files.into_iter() {
+                store.generate_step(&file)?;
             }
-        }
-        Command::Generation { command } => {
-            let repo = Repository::open(cli.path)?;
-            run_generation_command(repo, command)?;
         }
         Command::Object { command } => {
             let repo = Repository::open(cli.path)?;
@@ -135,38 +110,10 @@ fn run_object_command(repo: Repository, command: ObjectCommand) -> Result<()> {
         ObjectCommand::AtPath { path } => {
             let store = Store::new(&repo);
 
-            let path = dj::path::Path::from_str(&path)?;
-            let store_path = store.objects_path().join(path.to_store_path());
+            let path = dj::path::RepoPath::from_str(&path)?;
+            let bytes = store.read(path)?;
 
-            if !store_path.exists() {
-                return Err(eyre!("Requested path doesn't exist."));
-            }
-
-            let bytes = std::fs::read(store_path)?;
             stdout().write_all(&bytes)?;
-        }
-        ObjectCommand::ListPaths => {
-            let store = Store::new(&repo);
-
-            for object in store.list_objects()? {
-                if let Ok(path) = dj::path::Path::from_store_path(object) {
-                    println!("{path}");
-                }
-            }
-        }
-    }
-
-    Ok(())
-}
-
-fn run_generation_command(mut repo: Repository, command: GenerationCommand) -> Result<()> {
-    match command {
-        GenerationCommand::Describe { msg } => {
-            let meta = Metadata::new(&repo)?;
-            meta.set_generation_description(*repo.generation(), msg)?;
-        }
-        GenerationCommand::New => {
-            repo.inc_generation();
         }
     }
 

@@ -3,30 +3,41 @@ use std::path::PathBuf;
 use base64::{engine::general_purpose::URL_SAFE, Engine};
 use thiserror::Error;
 
-use crate::Repository;
+use crate::{
+    path::{ObjectPath, RepoPath},
+    Repository,
+};
 
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error("Failed to read file metadata for file: '{1}'")]
+    FailedToReadFileMetadata(#[source] std::io::Error, PathBuf),
+    #[error("Failed to write metadata file for file: '{1}")]
+    FailedToWriteFileMetadata(#[source] std::io::Error, PathBuf),
+    #[error("Path '{0}' does not exist")]
+    PathDoesntExist(RepoPath),
+    #[error("Failed to read object: '{1}'")]
+    FailedToReadObject(#[source] std::io::Error, ObjectPath),
+    #[error("Failed to write to object: '{1}'")]
+    FailedToWriteToObject(#[source] std::io::Error, ObjectPath),
     #[error("Failed to create store directory")]
     FailedToCreateStoreDir(#[source] std::io::Error),
-    #[error("Failed to read directory '{}'", .1.display())]
-    FailedToReadDir(#[source] std::io::Error, PathBuf),
-    #[error("Failed to create directory '{}'", .1.display())]
-    FailedToCreateDir(#[source] std::io::Error, PathBuf),
-    #[error("Failed to read file '{}'", .1.display())]
+    #[error("Failed to read file: '{1}'")]
     FailedToReadFile(#[source] std::io::Error, PathBuf),
-    #[error("Failed to write to file '{}'", .1.display())]
-    FailedToWriteToFile(#[source] std::io::Error, PathBuf),
-    #[error("The file '{}' is not in the repository working directory.", .0.display())]
-    FileNotInWorking(PathBuf),
-    #[error("Failed to decode base64")]
-    DecodeError(#[from] base64::DecodeError),
-    #[error("Invalid utf8")]
-    InvalidUtf8(#[from] std::string::FromUtf8Error),
+    #[error("Failed to read a store directory: '{1}'")]
+    FailedToReadStoreDir(#[source] std::io::Error, PathBuf),
+    #[error("Failed to copy file '{1}' to '{2}'")]
+    FailedToCopyFile(#[source] std::io::Error, PathBuf, PathBuf),
+    #[error("Path isn't in repository: '{0}'")]
+    PathIsntInRepository(PathBuf),
 }
 
 pub struct Store<'repo> {
     repo: &'repo Repository,
+}
+
+pub struct FileMeta {
+    steps: Vec<ObjectPath>,
 }
 
 impl<'repo> Store<'repo> {
@@ -38,182 +49,173 @@ impl<'repo> Store<'repo> {
         self.repo.path().join("store")
     }
 
-    fn ensure_store_path_exists(&self) -> Result<(), Error> {
-        let store_path = self.store_path();
-        if !store_path.exists() {
-            std::fs::create_dir_all(&store_path).map_err(Error::FailedToCreateStoreDir)?;
-        }
-        Ok(())
+    pub fn tracked_files(&self) -> Result<Vec<PathBuf>, Error> {
+        let paths_dir = self.store_path().join("paths");
+        Ok(paths_dir
+            .read_dir()
+            .map_err(|e| Error::FailedToReadStoreDir(e, paths_dir))?
+            .into_iter()
+            .filter_map(|entry| entry.ok())
+            .map(|entry| {
+                let path = entry.path();
+                let file_name = path.file_name().unwrap().to_str().unwrap();
+                URL_SAFE.decode(file_name).unwrap()
+            })
+            .map(String::from_utf8)
+            .filter_map(|x| x.ok())
+            .map(PathBuf::from)
+            .collect())
     }
-
     pub fn is_tracked(&self, path: &PathBuf) -> bool {
         let Some(path) = self.repo.relative_path(path) else {
             return false;
         };
 
-        let path_encoded = crate::path_to_base64(&path);
-
-        let store_path = self.store_path().join(path_encoded);
-
-        store_path.exists()
+        let metadata_path = self.get_metadata_path(&path);
+        metadata_path.exists()
     }
-    pub fn tracked_files(&self) -> Result<Vec<PathBuf>, Error> {
-        self.store_path()
-            .read_dir()
-            .map_err(|e| Error::FailedToReadDir(e, self.store_path()))?
-            .filter_map(|entry| entry.ok())
-            .filter(|entry| entry.file_type().unwrap().is_dir())
-            .map(|entry| {
-                let path = entry.path();
-                let filename = path.file_name().unwrap().to_str().unwrap();
-                let rel_path =
-                    String::from_utf8(URL_SAFE.decode(filename).map_err(Error::DecodeError)?)
-                        .map_err(Error::InvalidUtf8)?;
-                let rel_path = PathBuf::from(rel_path);
-                Ok(rel_path)
-            })
-            .collect()
-    }
-
     pub fn begin_tracking(&self, path: &PathBuf) -> Result<(), Error> {
         let path = self
             .repo
             .relative_path(path)
-            .ok_or(Error::FileNotInWorking(path.clone()))?;
+            .ok_or(Error::PathIsntInRepository(path.clone()))?;
 
-        if path.is_dir() {
-            return self.begin_tracking_dir(&path);
+        let metadata_path = self.get_metadata_path(&path);
+        if !self.store_path().join("paths").exists() {
+            std::fs::create_dir_all(self.store_path().join("paths"))
+                .map_err(Error::FailedToCreateStoreDir)?;
         }
-
-        self.ensure_store_path_exists()?;
-        let encoded_path = crate::path_to_base64(&path);
-        let tracking_dir_path = self.store_path().join(encoded_path);
-        if tracking_dir_path.exists() {
-            return Ok(());
+        if !metadata_path.exists() {
+            std::fs::write(metadata_path, [])
+                .map_err(|e| Error::FailedToWriteFileMetadata(e, path.clone()))?;
         }
-
-        std::fs::create_dir_all(&tracking_dir_path)
-            .map_err(|e| Error::FailedToCreateDir(e, tracking_dir_path))?;
-
         Ok(())
     }
 
-    fn begin_tracking_dir(&self, path: &PathBuf) -> Result<(), Error> {
-        let read_dir = path
-            .read_dir()
-            .map_err(|e| Error::FailedToReadDir(e, path.to_path_buf()))?;
-        for file in read_dir
-            .into_iter()
-            .filter_map(|r| r.ok())
-            .filter_map(|entry| entry.path().canonicalize().ok())
-        {
-            self.begin_tracking(&file)?;
+    fn get_metadata_path(&self, path: &PathBuf) -> PathBuf {
+        self.store_path()
+            .join("paths")
+            .join(URL_SAFE.encode(path.display().to_string().as_bytes()))
+    }
+
+    fn get_metadata(&self, path: &PathBuf) -> Result<FileMeta, Error> {
+        let meta_path = self.get_metadata_path(path);
+        let bytes = std::fs::read(&meta_path)
+            .map_err(|e| Error::FailedToReadFileMetadata(e, path.clone()))?;
+        let meta = parse_metadata(bytes.into_iter());
+        Ok(meta)
+    }
+
+    fn add_step(&self, path: &PathBuf, step: ObjectPath) -> Result<RepoPath, Error> {
+        let mut meta = self.get_metadata(path)?;
+        meta.steps.push(step);
+
+        let step = meta.steps.len() as u64 - 1;
+
+        let metadata_path = self.get_metadata_path(path);
+        if !metadata_path.parent().unwrap().exists() {
+            std::fs::create_dir_all(&metadata_path.parent().unwrap())
+                .map_err(Error::FailedToCreateStoreDir)?;
         }
+        std::fs::write(metadata_path, write_metadata(meta))
+            .map_err(|e| Error::FailedToWriteFileMetadata(e, path.clone()))?;
 
-        Ok(())
+        Ok(RepoPath::new(step, self.repo.relative_path(path).unwrap()).unwrap())
     }
 
-    pub fn list_objects(&self) -> Result<Vec<String>, Error> {
-        let Ok(read_dir) = self.store_path().read_dir() else {
-            return Ok(Vec::new());
-        };
-        let res: Vec<String> = 
-            // Iterate over entries.
-            read_dir
-            .into_iter()
-            // Ignore invalid entries
-            .filter_map(|res| res.ok())
-            // Get the path
-            .map(|entry| entry.path())
-            // Read the directory, and get all files within
-            .map(|path| {
-                let read_dir = path
-                    .read_dir()
-                    .map_err(|e| Error::FailedToReadDir(e, path))?;
-
-                // Return Result<Iter<Item = String>, Error>
-                Ok(
-                    read_dir
-                        .filter_map(|res| res.ok())
-                        .map(|entry| entry.path().display().to_string())
-                )
-            })
-            // Extract any errors
-            .collect::<Result<Vec<_>, Error>>()?
-            // Re-iterate and flatten
-            .into_iter()
-            .flatten()
-            // Collect into final Vec
-            .collect();
-        Ok(res)
-    }
-    fn list_objects_with_prefix(&self, prefix: &str) -> Result<Vec<String>, Error> {
-        Ok(self
-            .list_objects()?
-            .into_iter()
-            .filter(|x| x.starts_with(prefix))
-            .collect())
-    }
-
-    fn get_next_object_step(&self, path: &PathBuf) -> Result<u64, Error> {
+    pub fn generate_step(&self, path: &PathBuf) -> Result<ObjectPath, Error> {
         let path = self
             .repo
             .relative_path(path)
-            .ok_or(Error::FileNotInWorking(path.clone()))?;
+            .ok_or(Error::PathIsntInRepository(path.clone()))?;
 
-        let prefix = 
-            PathBuf::from(URL_SAFE.encode(path.display().to_string())).join(self.repo.generation().to_string());
-        let objects = self.list_objects_with_prefix(&prefix)?;
+        let hash =
+            sha256::try_digest(&path).map_err(|e| Error::FailedToReadFile(e, path.clone()))?;
 
-        let next_step = objects.len() as u64 + 1;
-        Ok(next_step)
+        if !self.store_path().join("objects").exists() {
+            std::fs::create_dir_all(self.store_path().join("objects"))
+                .map_err(Error::FailedToCreateStoreDir)?;
+        }
+        let obj_path = self.store_path().join("objects").join(&hash);
+        std::fs::copy(&path, &obj_path)
+            .map_err(|e| Error::FailedToCopyFile(e, path.clone(), obj_path.clone()))?;
+
+        let (p1, p2) = hash.split_at(hash.len() / 2);
+        let p1 = u128::from_str_radix(p1, 16).unwrap();
+        let p2 = u128::from_str_radix(p2, 16).unwrap();
+        let object_path = ObjectPath { p1, p2 };
+
+        self.add_step(&path, object_path.clone())?;
+
+        Ok(object_path)
     }
 
-    pub fn add_object(&self, path: &PathBuf) -> Result<(), Error> {
-        let src_path = self
-            .repo
-            .relative_path(path)
-            .ok_or(Error::FileNotInWorking(path.clone()))?;
+    // Read a object from the store.
+    pub fn read(&self, path: impl AsRef<RepoPath>) -> Result<Vec<u8>, Error> {
+        let path = path.as_ref();
 
-        if src_path.is_dir() {
-            return self.add_object_dir(&src_path);
-        }
+        let meta = self.get_metadata(path.relative_path())?;
+        let obj_path = meta
+            .steps
+            .get(*path.step() as usize)
+            .ok_or(Error::PathDoesntExist(path.clone()))?;
 
-        if !self.is_tracked(&src_path) {
-            return Ok(());
-        }
+        let path = self.store_path().join("objects").join(obj_path.to_string());
 
-        self.ensure_store_path_exists()?;
-
-        let step = self.get_next_object_step(&src_path)?;
-        let obj_path = crate::path::Path::new(self.repo.generation, step, src_path.clone())
-            .expect("Path is already guaranteed to be relative")
-            .to_store_path();
-        let out_path = self.store_path().join(obj_path);
-
-        let bytes = if src_path.exists() {
-            std::fs::read(&src_path).map_err(|e| Error::FailedToReadFile(e, out_path.clone()))?
-        } else {
-            // If the src_path doesn't exist (file has been deleted), just create an empty object file.
-            Vec::new()
-        };
-        std::fs::write(&out_path, bytes).map_err(|e| Error::FailedToWriteToFile(e, out_path))?;
-
-        Ok(())
+        Ok(std::fs::read(path).map_err(|e| Error::FailedToReadObject(e, obj_path.clone()))?)
     }
 
-    fn add_object_dir(&self, path: &PathBuf) -> Result<(), Error> {
-        let read_dir = path
-            .read_dir()
-            .map_err(|e| Error::FailedToReadDir(e, path.to_path_buf()))?;
-        for file in read_dir
-            .into_iter()
-            .filter_map(|r| r.ok())
-            .filter_map(|entry| entry.path().canonicalize().ok())
-        {
-            self.add_object(&file)?;
+    // Write an object to the store.
+    pub fn write<C: AsRef<[u8]>>(
+        &self,
+        path: impl AsRef<RepoPath>,
+        content: C,
+    ) -> Result<(), Error> {
+        let path = path.as_ref();
+
+        let meta = self.get_metadata(path.relative_path())?;
+        let obj_path = meta
+            .steps
+            .get(*path.step() as usize)
+            .ok_or(Error::PathDoesntExist(path.clone()))?;
+        let path = self.store_path().join("objects").join(obj_path.to_string());
+
+        Ok(std::fs::write(path, content)
+            .map_err(|e| Error::FailedToWriteToObject(e, obj_path.clone()))?)
+    }
+}
+
+fn parse_metadata(mut bytes: impl Iterator<Item = u8>) -> FileMeta {
+    let mut next_chunk = || {
+        let mut buf1 = [0; 16];
+        let mut buf2 = [0; 16];
+
+        for i in 0..16 {
+            buf1[i] = bytes.next()?;
+        }
+        for i in 0..16 {
+            buf2[i] = bytes.next()?;
         }
 
-        Ok(())
+        Some((buf1, buf2))
+    };
+
+    let mut steps = Vec::new();
+
+    while let Some((chunk1, chunk2)) = next_chunk() {
+        let p1 = u128::from_be_bytes(chunk1);
+        let p2 = u128::from_be_bytes(chunk2);
+        let obj_path = ObjectPath { p1, p2 };
+        steps.push(obj_path);
     }
+
+    FileMeta { steps }
+}
+fn write_metadata(meta: FileMeta) -> Vec<u8> {
+    meta.steps
+        .into_iter()
+        .map(|step| [step.p1.to_be_bytes(), step.p2.to_be_bytes()])
+        .flatten()
+        .flatten()
+        .collect()
 }

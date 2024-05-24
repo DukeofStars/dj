@@ -1,6 +1,5 @@
 use std::{fmt::Display, path::PathBuf, str::FromStr};
 
-use base64::{engine::general_purpose::URL_SAFE, Engine};
 use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -17,76 +16,65 @@ pub enum Error {
     InvalidPathSyntax,
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub struct Path {
-    generation: u64,
+#[derive(Debug, Clone)]
+pub struct ObjectPath {
+    pub(crate) p1: u128,
+    pub(crate) p2: u128,
+}
+impl Display for ObjectPath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "{:x}{:x}", self.p1, self.p2)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct RepoPath {
     step: u64,
     relative_path: PathBuf,
 }
 
-impl Display for Path {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}:{}@{}",
-            self.generation,
-            self.relative_path.display(),
-            self.step,
-        )
+impl AsRef<RepoPath> for RepoPath {
+    fn as_ref(&self) -> &RepoPath {
+        &self
     }
 }
-impl FromStr for Path {
+impl Display for RepoPath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}@{}", self.relative_path.display(), self.step,)
+    }
+}
+impl FromStr for RepoPath {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let Some((generation, rest)) = s.split_once(":") else {
-            return Err(Error::InvalidPathSyntax);
-        };
-        let generation = u64::from_str(generation)
-            .map_err(|e| Error::ParseIntError(e, generation.to_string()))?;
-
-        let (path, step) = match rest.rsplit_once("@") {
+        let (path, step) = match s.rsplit_once("@") {
             Some((left, right)) => (left, right),
             None => return Err(Error::InvalidPathSyntax),
         };
         let step = u64::from_str(step).map_err(|e| Error::ParseIntError(e, step.to_string()))?;
         let path = PathBuf::from(path);
 
-        Path::new(generation, step, path)
+        RepoPath::new(step, path)
     }
 }
 
-impl Path {
-    pub fn new(generation: u64, step: u64, relative_path: PathBuf) -> Result<Path, Error> {
+impl RepoPath {
+    pub fn new(step: u64, relative_path: PathBuf) -> Result<RepoPath, Error> {
         if !relative_path.is_relative() {
             return Err(Error::PathIsntRelative(relative_path));
         }
 
         Ok(Self {
-            generation,
             step,
             relative_path,
         })
     }
 
-    pub fn to_store_path(&self) -> PathBuf {
-        PathBuf::from(URL_SAFE.encode(self.relative_path.display().to_string()))
-            .join(self.step.to_string())
+    pub fn relative_path(&self) -> &PathBuf {
+        &self.relative_path
     }
-    pub fn from_store_path(path: PathBuf) -> Result<Path, Error> {
-        if !path.is_relative() {
-            return Err(Error::InvalidPathSyntax);
-        }
-        let mut iter = path.components();
-        let rel_path = iter.next().ok_or(Error::InvalidPathSyntax)?;
-        let step = iter.next().ok_or(Error::InvalidPathSyntax)?;
-        if iter.count() != 0 {
-            return Err(Error::InvalidPathSyntax);
-        }
-
-        let rel_path = URL_SAFE.decode(rel_path);
-
-        todo!()
+    pub fn step(&self) -> &u64 {
+        &self.step
     }
 }
 
@@ -94,31 +82,31 @@ impl Path {
 mod tests {
     use std::{path::PathBuf, str::FromStr};
 
-    use crate::path::{Error, Path};
+    use crate::path::{Error, RepoPath};
 
     #[test]
     pub fn from_str_test() {
         assert_eq!(
-            Path::from_str("43:src/main.rs@18").unwrap(),
-            Path::new(43, 18, PathBuf::from("src/main.rs")).unwrap()
+            RepoPath::from_str("src/main.rs@18").unwrap(),
+            RepoPath::new(18, PathBuf::from("src/main.rs")).unwrap()
         );
     }
 
     #[test]
     pub fn to_str_test() {
         assert_eq!(
-            Path::new(43, 18, PathBuf::from("src/main.rs"))
+            RepoPath::new(18, PathBuf::from("src/main.rs"))
                 .unwrap()
                 .to_string(),
-            "43:src/main.rs@18".to_string()
+            "src/main.rs@18".to_string()
         )
     }
 
     #[test]
     pub fn round_trip_test() {
-        let path = Path::new(23, 78, PathBuf::from("Cargo.toml")).unwrap();
+        let path = RepoPath::new(78, PathBuf::from("Cargo.toml")).unwrap();
         let text = path.to_string();
-        let new_path = Path::from_str(&text).unwrap();
+        let new_path = RepoPath::from_str(&text).unwrap();
 
         assert_eq!(path, new_path);
     }
@@ -129,7 +117,8 @@ mod tests {
         let path_buf = PathBuf::from("/home/user/folder/file.txt");
         #[cfg(windows)]
         let path_buf = PathBuf::from(r#"C:\Users\user\folder\file.txt"#);
-        let res = Path::new(12, 2, path_buf.clone());
+
+        let res = RepoPath::new(2, path_buf.clone());
         let err = res.unwrap_err();
         assert_eq!(err, Error::PathIsntRelative(path_buf))
     }
