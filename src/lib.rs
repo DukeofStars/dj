@@ -9,6 +9,7 @@ pub mod store;
 pub struct Repository {
     path: PathBuf,
     work_dir: PathBuf,
+    branch: String,
 }
 impl Repository {
     pub fn path(&self) -> &PathBuf {
@@ -16,6 +17,9 @@ impl Repository {
     }
     pub fn work_dir(&self) -> &PathBuf {
         &self.work_dir
+    }
+    pub fn branch(&self) -> &String {
+        &self.branch
     }
 
     pub fn relative_path<'a>(&self, path: &'a PathBuf) -> Option<PathBuf> {
@@ -43,8 +47,20 @@ impl Repository {
                 work_dir.to_path_buf()
             }
         };
+        let branch_file_path = path.join("branch");
+        let branch = match std::fs::read_to_string(&branch_file_path) {
+            Ok(branch) => branch,
+            _ => {
+                eprintln!("No branch found, assuming 'local/main'");
+                String::from("local/main")
+            }
+        };
 
-        Ok(Repository { path, work_dir })
+        Ok(Repository {
+            path,
+            work_dir,
+            branch,
+        })
     }
 
     fn save_state(&self) -> Result<(), Error> {
@@ -52,6 +68,7 @@ impl Repository {
             self.path.join("working"),
             self.work_dir().display().to_string(),
         )?;
+        std::fs::write(self.path.join("branch"), self.branch())?;
 
         Ok(())
     }
@@ -114,6 +131,7 @@ mod tests {
         let repo = Repository {
             path: PathBuf::from("/path/to/repository/.dj"),
             work_dir: PathBuf::from("/path/to/repository"),
+            branch: String::from("local/main"),
         };
 
         let file = PathBuf::from("/path/to/repository/foo.txt");

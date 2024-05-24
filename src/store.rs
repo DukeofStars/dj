@@ -12,7 +12,7 @@ use crate::{
 pub enum Error {
     #[error("Failed to read file metadata for file: '{1}'")]
     FailedToReadFileMetadata(#[source] std::io::Error, PathBuf),
-    #[error("Failed to write metadata file for file: '{1}")]
+    #[error("Failed to write metadata file for file: '{1}'")]
     FailedToWriteFileMetadata(#[source] std::io::Error, PathBuf),
     #[error("Path '{0}' does not exist")]
     PathDoesntExist(RepoPath),
@@ -50,12 +50,13 @@ impl<'repo> Store<'repo> {
     }
 
     pub fn tracked_files(&self) -> Result<Vec<PathBuf>, Error> {
-        let paths_dir = self.store_path().join("paths");
+        let paths_dir = self.store_path().join("paths").join(self.repo.branch());
         Ok(paths_dir
             .read_dir()
             .map_err(|e| Error::FailedToReadStoreDir(e, paths_dir))?
             .into_iter()
             .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.file_type().is_ok_and(|t| t.is_file()))
             .map(|entry| {
                 let path = entry.path();
                 let file_name = path.file_name().unwrap().to_str().unwrap();
@@ -81,8 +82,8 @@ impl<'repo> Store<'repo> {
             .ok_or(Error::PathIsntInRepository(path.clone()))?;
 
         let metadata_path = self.get_metadata_path(&path);
-        if !self.store_path().join("paths").exists() {
-            std::fs::create_dir_all(self.store_path().join("paths"))
+        if !metadata_path.parent().unwrap().exists() {
+            std::fs::create_dir_all(&metadata_path.parent().unwrap())
                 .map_err(Error::FailedToCreateStoreDir)?;
         }
         if !metadata_path.exists() {
@@ -95,6 +96,7 @@ impl<'repo> Store<'repo> {
     fn get_metadata_path(&self, path: &PathBuf) -> PathBuf {
         self.store_path()
             .join("paths")
+            .join(self.repo.branch())
             .join(URL_SAFE.encode(path.display().to_string().as_bytes()))
     }
 
@@ -120,7 +122,12 @@ impl<'repo> Store<'repo> {
         std::fs::write(metadata_path, write_metadata(meta))
             .map_err(|e| Error::FailedToWriteFileMetadata(e, path.clone()))?;
 
-        Ok(RepoPath::new(step, self.repo.relative_path(path).unwrap()).unwrap())
+        Ok(RepoPath::new(
+            self.repo.branch().clone(),
+            step,
+            self.repo.relative_path(path).unwrap(),
+        )
+        .unwrap())
     }
 
     pub fn generate_step(&self, path: &PathBuf) -> Result<ObjectPath, Error> {
