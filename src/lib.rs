@@ -1,9 +1,29 @@
-use std::path::PathBuf;
+use std::{fs::File, io::BufReader, path::PathBuf};
 
 use thiserror::Error;
 
 pub mod path;
 pub mod store;
+
+#[derive(Debug, Error)]
+pub enum Error {
+    #[error("Repository already exists")]
+    RepositoryAlreadyExists,
+    #[error("Repository doesn't exist")]
+    RepositoryDoesntExist,
+    #[error(transparent)]
+    IoError(#[from] std::io::Error),
+    #[error("The path '{}' is not in working", .0.display())]
+    FileNotInWorking(PathBuf),
+    #[error("Failed to create directory: '{}'", .0.display())]
+    DirCreationFailed(PathBuf, #[source] std::io::Error),
+    #[error("The repository has no working directory")]
+    NoWorking,
+    #[error("Failed to parse '{1}' as int.")]
+    ParseIntError(#[source] core::num::ParseIntError, String),
+    #[error("Path '{}' is not relative", .0.display())]
+    PathIsntRelative(PathBuf),
+}
 
 #[derive(Debug)]
 pub struct Repository {
@@ -83,20 +103,16 @@ impl Drop for Repository {
     }
 }
 
-#[derive(Debug, Error)]
-pub enum Error {
-    #[error("Repository already exists")]
-    RepositoryAlreadyExists,
-    #[error("Repository doesn't exist")]
-    RepositoryDoesntExist,
-    #[error(transparent)]
-    IoError(#[from] std::io::Error),
-    #[error("Failed to create directory: '{}'", .0.display())]
-    FailedToCreateDir(PathBuf, #[source] std::io::Error),
-    #[error("The repository has no working directory")]
-    NoWorking,
-    #[error("Failed to parse '{1}' as int.")]
-    ParseIntError(#[source] core::num::ParseIntError, String),
+pub fn hash_file(path: &PathBuf) -> std::io::Result<blake3::Hash> {
+    let mut hasher = blake3::Hasher::new();
+    let file = File::open(&path)?;
+    let mut reader = BufReader::new(file);
+
+    std::io::copy(&mut reader, &mut hasher)?;
+
+    let hash = hasher.finalize();
+
+    Ok(hash)
 }
 
 pub fn create_repository(path: PathBuf, work_dir: PathBuf) -> Result<Repository, Error> {
@@ -108,10 +124,10 @@ pub fn create_repository(path: PathBuf, work_dir: PathBuf) -> Result<Repository,
 }
 
 pub fn create_repository_force(path: PathBuf, work_dir: PathBuf) -> Result<Repository, Error> {
-    std::fs::create_dir_all(&path).map_err(|e| Error::FailedToCreateDir(path.clone(), e))?;
+    std::fs::create_dir_all(&path).map_err(|e| Error::DirCreationFailed(path.clone(), e))?;
     if !work_dir.exists() {
         std::fs::create_dir_all(&work_dir)
-            .map_err(|e| Error::FailedToCreateDir(work_dir.clone(), e))?;
+            .map_err(|e| Error::DirCreationFailed(work_dir.clone(), e))?;
     }
 
     let work_dir = work_dir.canonicalize()?;

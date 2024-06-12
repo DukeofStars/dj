@@ -5,8 +5,11 @@ use std::{
 };
 
 use clap::{Parser, Subcommand};
-use color_eyre::{eyre::WrapErr, Result};
-use dj::{store::Store, Repository};
+use color_eyre::{eyre::Context, Result};
+use dj::{
+    store::{file_store::FileStore, Store},
+    Repository,
+};
 
 #[derive(Debug, Parser)]
 struct Cli {
@@ -40,6 +43,7 @@ enum Command {
     Cat {
         path: String,
     },
+    Status,
 }
 #[derive(Debug, Subcommand)]
 enum ObjectCommand {
@@ -69,7 +73,7 @@ fn main() -> Result<()> {
         }
         Command::Track { files } => {
             let repo = Repository::open(cli.path)?;
-            let store = Store::new(&repo);
+            let store = FileStore::new(&repo);
 
             for file in files.iter().filter_map(|f| f.canonicalize().ok()) {
                 if !store.is_tracked(&file) {
@@ -81,14 +85,18 @@ fn main() -> Result<()> {
         }
         Command::Step { files } => {
             let repo = Repository::open(cli.path)?;
-            let store = Store::new(&repo);
+            let store = FileStore::new(&repo);
             let files = if !files.is_empty() {
                 files.iter().filter_map(|f| f.canonicalize().ok()).collect()
             } else {
                 store.tracked_files()?
             };
             for file in files.into_iter() {
-                store.generate_step(&file)?;
+                if !file.exists() {
+                    store.mark_file_removed(&file)?;
+                } else {
+                    store.generate_step(&file)?;
+                }
             }
         }
         Command::Object { command } => {
@@ -100,6 +108,55 @@ fn main() -> Result<()> {
             let command = ObjectCommand::AtPath { path };
             run_object_command(repo, command)?;
         }
+        Command::Status => {
+            let repo = Repository::open(cli.path)?;
+            let store = FileStore::new(&repo);
+
+            enum FileStatus {
+                Changed(PathBuf),
+                Deleted(PathBuf),
+                Created(PathBuf),
+                Noop,
+            }
+
+            let tracked_files = store.tracked_files()?;
+            let files: Vec<_> = tracked_files
+                .into_iter()
+                .map(|file| {
+                    let metadata = store
+                        .get_metadata(&file)
+                        .expect("Tracked file has no metadata. This is contradictory.");
+                    let last_hash = metadata.steps.last().map(|x| x.hash());
+                    if let Some(last_hash) = last_hash {
+                        if last_hash.as_bytes() == &[0; blake3::OUT_LEN] {
+                            FileStatus::Noop
+                        } else {
+                            let Ok(new_hash) = dj::hash_file(&file) else {
+                                return FileStatus::Deleted(file);
+                            };
+                            match new_hash == *last_hash {
+                                true => FileStatus::Noop,
+                                false => FileStatus::Changed(file),
+                            }
+                        }
+                    } else {
+                        FileStatus::Changed(file)
+                    }
+                })
+                .collect();
+            if !files.is_empty() {
+                println!("== Changed files");
+
+                for file in files {
+                    match file {
+                        FileStatus::Changed(p) => println!("M: {}", p.display()),
+                        FileStatus::Deleted(p) => println!("D: {}", p.display()),
+                        FileStatus::Created(p) => println!("C: {}", p.display()),
+                        FileStatus::Noop => {}
+                    }
+                }
+            }
+        }
     }
 
     Ok(())
@@ -108,7 +165,7 @@ fn main() -> Result<()> {
 fn run_object_command(repo: Repository, command: ObjectCommand) -> Result<()> {
     match command {
         ObjectCommand::AtPath { path } => {
-            let store = Store::new(&repo);
+            let store = FileStore::new(&repo);
 
             let path = dj::path::RepoPath::from_str(&path)?;
             let bytes = store.read(path)?;

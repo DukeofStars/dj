@@ -5,8 +5,8 @@ edition = "2021"
 
 [dependencies]
 base64 = "0.22.0"
+blake3 = "1.5"
 clap = { version = "4.5.4", features = ["derive"] }
 color-eyre = "0.6.3"
-sha256 = "1.5.0"
 thiserror = "1.0.58"
 wild = "2.2.1"

@@ -1,5 +1,6 @@
 use std::{fmt::Display, path::PathBuf, str::FromStr};
 
+use blake3::Hash;
 use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -17,13 +18,15 @@ pub enum Error {
 }
 
 #[derive(Debug, Clone)]
-pub struct ObjectPath {
-    pub(crate) p1: u128,
-    pub(crate) p2: u128,
-}
+pub struct ObjectPath(pub(crate) Hash);
 impl Display for ObjectPath {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(f, "{:x}{:x}", self.p1, self.p2)
+        self.0.fmt(f)
+    }
+}
+impl ObjectPath {
+    pub fn hash(&self) -> &Hash {
+        &self.0
     }
 }
 
