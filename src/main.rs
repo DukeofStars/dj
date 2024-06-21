@@ -7,6 +7,7 @@ use std::{
 use clap::{Parser, Subcommand};
 use color_eyre::{eyre::Context, Result};
 use dj::{
+    changes::{RepoStateFromStore, RepoStateFromWorking},
     store::{file_store::FileStore, Store},
     Repository,
 };
@@ -44,6 +45,7 @@ enum Command {
         path: String,
     },
     Status,
+    Diff,
 }
 #[derive(Debug, Subcommand)]
 enum ObjectCommand {
@@ -154,6 +156,22 @@ fn main() -> Result<()> {
                         FileStatus::Created(p) => println!("C: {}", p.display()),
                         FileStatus::Noop => {}
                     }
+                }
+            }
+        }
+        Command::Diff => {
+            let repo = Repository::open(cli.path)?;
+            let store = FileStore::new(&repo);
+
+            let state1 = RepoStateFromStore::from_latest(&store)?;
+            let state2 = RepoStateFromWorking::new(&repo);
+
+            let diff = dj::changes::compare_states(state1, state2)?;
+
+            if !diff.changed_files.is_empty() {
+                for (path, file_diff) in &diff.changed_files {
+                    println!("--- {}", path.display());
+                    println!("{}", file_diff);
                 }
             }
         }

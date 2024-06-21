@@ -2,6 +2,7 @@ use std::{fs::File, io::BufReader, path::PathBuf};
 
 use thiserror::Error;
 
+pub mod changes;
 pub mod path;
 pub mod store;
 
