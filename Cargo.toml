@@ -1,5 +1,5 @@
 [package]
-name = "dj"
+name = "tn"
 version = "0.1.0"
 edition = "2021"
 
@@ -10,4 +10,6 @@ clap = { version = "4.5.4", features = ["derive"] }
 color-eyre = "0.6.3"
 prettydiff = "0.7.0"
 thiserror = "1.0.58"
+tracing = "0.1.40"
+tracing-subscriber = "0.3.18"
 wild = "2.2.1"

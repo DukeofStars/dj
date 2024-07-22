@@ -24,7 +24,7 @@ let
         sha256 = "0jx2x49p438ap6psy8513mc1nnpinmhm8ps0a4ngfms9jmvwrlbi";
       }) { inherit lib; }).gitignoreSource;
 in
-rustPlatform.buildRustPackage rec {
+rustPlatform.buildRustPackage {
   pname = "sample-flake-rust";
   version = "0.0.1";
 
@@ -40,7 +40,7 @@ rustPlatform.buildRustPackage rec {
 
   meta = with stdenv.lib; {
     homepage = "";
-    description = "Sample flake repository for a Rust application";
+    description = "Simple source control manager.";
     license = licenses.mit;
   };
 }
